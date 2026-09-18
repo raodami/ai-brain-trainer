@@ -7,109 +7,128 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type UserRecord struct {
-	ID         string    `json:"id"`
-	Username   string    `json:"username"`
-	Email      string    `json:"email"`
-	IsPro      bool      `json:"is_pro"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
 type SessionRecord struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	GameType    string    `json:"game_type"`
-	Score       int       `json:"score"`
-	Accuracy    float64   `json:"accuracy"`
-	Difficulty  int       `json:"difficulty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	GameType     string    `json:"game_type"`
+	Score        int       `json:"score"`
+	Accuracy     float64   `json:"accuracy"`
+	ResponseTime int64     `json:"response_time"`
+	Difficulty   int       `json:"difficulty"`
+	AdaptiveLevel int      `json:"adaptive_level"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
-type DailyStats struct {
-	Date           string  `json:"date"`
-	TotalSessions  int     `json:"total_sessions"`
-	AvgScore       float64 `json:"avg_score"`
-	AvgAccuracy    float64 `json:"avg_accuracy"`
-	TimeSpentMin   float64 `json:"time_spent_min"`
+type UserStats struct {
+	UserID        string    `json:"user_id"`
+	TotalGames    int       `json:"total_games"`
+	TotalSessions int       `json:"total_sessions"`
+	AverageScore  float64   `json:"average_score"`
+	AvgAccuracy   float64   `json:"avg_accuracy"`
+	AvgResponseTime int64   `json:"avg_response_time"`
+	CurrentStreak int       `json:"current_streak"`
+	BestStreak    int       `json:"best_streak"`
+	Level         int       `json:"level"`
+	XP            int       `json:"xp"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-type Store struct {
+type Achievement struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Code      string    `json:"code"`
+	Name      string    `json:"name"`
+	Description string  `json:"description"`
+	UnlockedAt time.Time `json:"unlocked_at"`
+}
+
+type LeaderboardEntry struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+	Score    int    `json:"score"`
+	Level    int    `json:"level"`
+	Rank     int    `json:"rank"`
+}
+
+type TrainerStore struct {
 	db *sql.DB
 }
 
-func New(dbPath string) (*Store, error) {
+func New(dbPath string) (*TrainerStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Store{db: db}
+	s := &TrainerStore{db: db}
 	if err := s.initSchema(); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-func (s *Store) initSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		username TEXT UNIQUE,
-		email TEXT UNIQUE,
-		is_pro BOOLEAN DEFAULT 0,
-		expires_at DATETIME,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE TABLE IF NOT EXISTS sessions (
-		id TEXT PRIMARY KEY,
-		user_id TEXT,
-		game_type TEXT,
-		score INTEGER,
-		accuracy REAL,
-		difficulty INTEGER,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-	CREATE INDEX IF NOT EXISTS idx_sessions_type ON sessions(game_type);
-	`
-	_, err := s.db.Exec(schema)
-	return err
-}
-
-func (s *Store) CreateUser(u *UserRecord) error {
-	_, err := s.db.Exec(
-		"INSERT INTO users (id, username, email, is_pro, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		u.ID, u.Username, u.Email, u.IsPro, u.ExpiresAt, u.CreatedAt,
-	)
-	return err
-}
-
-func (s *Store) GetUser(id string) (*UserRecord, error) {
-	var u UserRecord
-	err := s.db.QueryRow(
-		"SELECT id, username, email, is_pro, expires_at, created_at FROM users WHERE id = ?",
-		id,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.IsPro, &u.ExpiresAt, &u.CreatedAt)
-	if err != nil {
-		return nil, err
+func (s *TrainerStore) initSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			game_type TEXT NOT NULL,
+			score INTEGER NOT NULL,
+			accuracy REAL NOT NULL,
+			response_time INTEGER NOT NULL,
+			difficulty INTEGER DEFAULT 1,
+			adaptive_level INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			username TEXT UNIQUE NOT NULL,
+			email TEXT UNIQUE NOT NULL,
+			password TEXT NOT NULL,
+			is_pro BOOLEAN DEFAULT 0,
+			expires_at DATETIME,
+			session_id TEXT,
+			level INTEGER DEFAULT 1,
+			xp INTEGER DEFAULT 0,
+			streak INTEGER DEFAULT 0,
+			best_streak INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS achievements (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			code TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL,
+			unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_achievements_user ON achievements(user_id)`,
 	}
-	return &u, nil
+
+	for _, q := range queries {
+		if _, err := s.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (s *Store) SaveSession(session *SessionRecord) error {
+func (s *TrainerStore) CreateSession(record *SessionRecord) error {
 	_, err := s.db.Exec(
-		"INSERT INTO sessions (id, user_id, game_type, score, accuracy, difficulty, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		session.ID, session.UserID, session.GameType, session.Score, session.Accuracy, session.Difficulty, session.CreatedAt,
+		"INSERT INTO sessions (id, user_id, game_type, score, accuracy, response_time, difficulty, adaptive_level, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		record.ID, record.UserID, record.GameType, record.Score, record.Accuracy,
+		record.ResponseTime, record.Difficulty, record.AdaptiveLevel, record.CreatedAt,
 	)
 	return err
 }
 
-func (s *Store) GetRecentSessions(userID string, limit int) ([]*SessionRecord, error) {
+func (s *TrainerStore) GetUserSessions(userID string, limit int) ([]*SessionRecord, error) {
 	rows, err := s.db.Query(
-		"SELECT id, user_id, game_type, score, accuracy, difficulty, created_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+		"SELECT id, user_id, game_type, score, accuracy, response_time, difficulty, adaptive_level, created_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
 		userID, limit,
 	)
 	if err != nil {
@@ -117,56 +136,137 @@ func (s *Store) GetRecentSessions(userID string, limit int) ([]*SessionRecord, e
 	}
 	defer rows.Close()
 
-	var sessions []*SessionRecord
+	var records []*SessionRecord
 	for rows.Next() {
-		var s SessionRecord
-		if err := rows.Scan(&s.ID, &s.UserID, &s.GameType, &s.Score, &s.Accuracy, &s.Difficulty, &s.CreatedAt); err != nil {
-			continue
+		var r SessionRecord
+		if err := rows.Scan(&r.ID, &r.UserID, &r.GameType, &r.Score, &r.Accuracy, &r.ResponseTime, &r.Difficulty, &r.AdaptiveLevel, &r.CreatedAt); err != nil {
+			return nil, err
 		}
-		sessions = append(sessions, &s)
+		records = append(records, &r)
 	}
-	return sessions, rows.Err()
+	return records, nil
 }
 
-func (s *Store) GetDailyStats(userID string, date string) (*DailyStats, error) {
-	var stats DailyStats
+func (s *TrainerStore) GetOrCreateUserStats(userID string) (*UserStats, error) {
+	var stats UserStats
 	err := s.db.QueryRow(
-		`SELECT 
-			COUNT(*) as total_sessions,
-			COALESCE(AVG(score), 0) as avg_score,
-			COALESCE(AVG(accuracy), 0) as avg_accuracy,
-			COALESCE(SUM(
-				(SELECT strftime('%s', 'now') - strftime('%s', created_at)) / 60.0
-				FROM sessions s2 WHERE s2.user_id = ? AND DATE(s2.created_at) = ?
-			), 0) as time_spent_min
-		FROM sessions 
-		WHERE user_id = ? AND DATE(created_at) = ?`,
-		userID, date, userID, date,
-	).Scan(&stats.TotalSessions, &stats.AvgScore, &stats.AvgAccuracy, &stats.TimeSpentMin)
-	
+		`SELECT u.id, u.level, u.xp, u.streak, u.best_streak,
+			COUNT(s.id), AVG(s.score), AVG(s.accuracy), AVG(s.response_time), u.updated_at
+			FROM users u
+			LEFT JOIN sessions s ON u.id = s.user_id
+			WHERE u.id = ?
+			GROUP BY u.id`,
+		userID,
+	).Scan(&stats.UserID, &stats.Level, &stats.XP, &stats.CurrentStreak, &stats.BestStreak,
+		&stats.TotalSessions, &stats.AverageScore, &stats.AvgAccuracy, &stats.AvgResponseTime, &stats.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		stats.UserID = userID
+		stats.Level = 1
+		stats.XP = 0
+		stats.TotalSessions = 0
+		return &stats, nil
+	}
+	return &stats, err
+}
+
+func (s *TrainerStore) UpdateUserStats(userID string, score int, xpGain int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var currentLevel, currentXP int
+	err = tx.QueryRow("SELECT level, xp FROM users WHERE id = ?", userID).Scan(&currentLevel, &currentXP)
+	if err != nil {
+		return err
+	}
+
+	newXP := currentXP + xpGain
+	newLevel := currentLevel
+	for newXP >= newLevel*100 {
+		newXP -= newLevel * 100
+		newLevel++
+	}
+
+	_, err = tx.Exec(
+		"UPDATE users SET xp = ?, level = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		newXP, newLevel, userID,
+	)
+	return err
+}
+
+func (s *TrainerStore) GetUserAchievements(userID string) ([]*Achievement, error) {
+	rows, err := s.db.Query(
+		"SELECT id, user_id, code, name, description, unlocked_at FROM achievements WHERE user_id = ? ORDER BY unlocked_at DESC",
+		userID,
+	)
 	if err != nil {
 		return nil, err
 	}
-	stats.Date = date
-	return &stats, nil
+	defer rows.Close()
+
+	var achievements []*Achievement
+	for rows.Next() {
+		var a Achievement
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Code, &a.Name, &a.Description, &a.UnlockedAt); err != nil {
+			return nil, err
+		}
+		achievements = append(achievements, &a)
+	}
+	return achievements, nil
 }
 
-func (s *Store) GetUserStats(userID string) (map[string]interface{}, error) {
-	var totalSessions, proUsers int
-	var totalScore float64
-	
-	s.db.QueryRow("SELECT COUNT(*) FROM sessions WHERE user_id = ?", userID).Scan(&totalSessions)
-	s.db.QueryRow("SELECT COALESCE(SUM(score), 0) FROM sessions WHERE user_id = ?", userID).Scan(&totalScore)
-	s.db.QueryRow("SELECT COUNT(*) FROM users WHERE is_pro = 1").Scan(&proUsers)
-	
-	return map[string]interface{}{
-		"total_sessions": totalSessions,
-		"total_score":    totalScore,
-		"avg_score":      totalScore / float64(max(totalSessions, 1)),
-		"pro_users":      proUsers,
-	}, nil
+func (s *TrainerStore) UnlockAchievement(userID, code, name, description string) (*Achievement, error) {
+	id := userID + "-" + code
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO achievements (id, user_id, code, name, description, unlocked_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+		id, userID, code, name, description,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var a Achievement
+	a.ID = id
+	a.UserID = userID
+	a.Code = code
+	a.Name = name
+	a.Description = description
+	a.UnlockedAt = time.Now()
+	return &a, nil
 }
 
-func (s *Store) Close() error {
+func (s *TrainerStore) GetLeaderboard(limit int) ([]*LeaderboardEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT u.id, u.username, COALESCE(u.avatar, '🎭'), COALESCE(SUM(s.score), 0), u.level
+			FROM users u
+			LEFT JOIN sessions s ON u.id = s.user_id
+			GROUP BY u.id
+			ORDER BY SUM(s.score) DESC
+			LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []*LeaderboardEntry
+	rank := 1
+	for rows.Next() {
+		var e LeaderboardEntry
+		if err := rows.Scan(&e.UserID, &e.Username, &e.Avatar, &e.Score, &e.Level); err != nil {
+			return nil, err
+		}
+		e.Rank = rank
+		entries = append(entries, &e)
+		rank++
+	}
+	return entries, nil
+}
+
+func (s *TrainerStore) Close() error {
 	return s.db.Close()
 }

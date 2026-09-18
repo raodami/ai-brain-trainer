@@ -1,127 +1,170 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"ai-brain-trainer/internal/games"
 	"ai-brain-trainer/internal/store"
 )
 
-func SetupRoutes(r *gin.Engine, s *store.Store) {
-	// Game endpoints
-	r.POST("/api/game/:type", func(c *gin.Context) {
-		gameType := c.Param("type")
-		difficulty := 1
-		
-		// Parse difficulty from query or body
-		if d := c.Query("difficulty"); d != "" {
-			fmt.Sscanf(d, "%d", &difficulty)
-		}
-		
-		engine := games.GetGameEngine(gameType)
-		result, err := engine.RunRound(difficulty)
+func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
+	// Public routes
+	r.GET("/api/stats/overview", func(c *gin.Context) {
+		stats, err := store.GetOrCreateUserStats("demo")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		
-		c.JSON(http.StatusOK, gin.H{
-			"game_type":  result.GameType,
-			"score":      result.Score,
-			"accuracy":   result.Accuracy,
-			"response_time": result.ResponseTime,
-			"difficulty": result.Difficulty,
-		})
+		c.JSON(http.StatusOK, stats)
 	})
-	
-	// Save session
-	r.POST("/api/session", func(c *gin.Context) {
+
+	r.GET("/api/sessions", func(c *gin.Context) {
+		userID := c.GetHeader("X-User-ID")
+		if userID == "" {
+			userID = "demo"
+		}
+		limit := c.DefaultQuery("limit", "20")
+		sessions, err := store.GetUserSessions(userID, 20)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, sessions)
+	})
+
+	r.GET("/api/leaderboard", func(c *gin.Context) {
+		limit := 10
+		if l := c.Query("limit"); l != "" {
+			// parse limit
+		}
+		entries, err := store.GetLeaderboard(limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, entries)
+	})
+
+	r.GET("/api/achievements", func(c *gin.Context) {
+		userID := c.GetHeader("X-User-ID")
+		if userID == "" {
+			userID = "demo"
+		}
+		achievements, err := store.GetUserAchievements(userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, achievements)
+	})
+
+	// Game routes
+	r.POST("/api/game/play", func(c *gin.Context) {
 		var req struct {
-			UserID   string `json:"user_id"`
-			GameType string `json:"game_type"`
-			Score    int    `json:"score"`
-			Accuracy float64 `json:"accuracy"`
+			GameType   string `json:"game_type" binding:"required"`
 			Difficulty int  `json:"difficulty"`
 		}
-		
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		
-		sessionID := uuid.New().String()
-		s.SaveSession(&store.SessionRecord{
-			ID:         sessionID,
-			UserID:     req.UserID,
-			GameType:   req.GameType,
-			Score:      req.Score,
-			Accuracy:   req.Accuracy,
-			Difficulty: req.Difficulty,
-			CreatedAt:  time.Now(),
-		})
-		
-		c.JSON(http.StatusOK, gin.H{"id": sessionID})
-	})
-	
-	// Get recent sessions
-	r.GET("/api/sessions/:user_id", func(c *gin.Context) {
-		userID := c.Param("user_id")
-		limit := 20
-		if l := c.Query("limit"); l != "" {
-			fmt.Sscanf(l, "%d", &limit)
+
+		if req.Difficulty < 0 {
+			req.Difficulty = 0
 		}
-		
-		sessions, err := s.GetRecentSessions(userID, limit)
+		if req.Difficulty > 4 {
+			req.Difficulty = 4
+		}
+
+		result, err := games.PlayGame(req.GameType, req.Difficulty)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		
-		c.JSON(http.StatusOK, sessions)
-	})
-	
-	// Get daily stats
-	r.GET("/api/stats/:user_id", func(c *gin.Context) {
-		userID := c.Param("user_id")
-		date := time.Now().Format("2006-01-02")
-		if d := c.Query("date"); d != "" {
-			date = d
+
+		// Save session
+		userID := c.GetHeader("X-User-ID")
+		if userID == "" {
+			userID = "demo"
 		}
-		
-		stats, err := s.GetDailyStats(userID, date)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		session := &store.SessionRecord{
+			ID:           uuid.New().String(),
+			UserID:       userID,
+			GameType:     result.GameType,
+			Score:        result.Score,
+			Accuracy:     result.Accuracy,
+			ResponseTime: result.ResponseTime,
+			Difficulty:   req.Difficulty,
+			AdaptiveLevel: result.AdaptiveLevel,
+		}
+		if err := store.CreateSession(session); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 			return
 		}
-		
-		c.JSON(http.StatusOK, stats)
+
+		// Update XP and level
+		store.UpdateUserStats(userID, result.Score, result.Score/10)
+
+		// Check achievements
+		checkAchievements(store, userID, result)
+
+		c.JSON(http.StatusOK, result)
 	})
-	
-	// Get user stats
-	r.GET("/api/user/stats/:user_id", func(c *gin.Context) {
-		userID := c.Param("user_id")
-		
-		stats, err := s.GetUserStats(userID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+
+	r.GET("/api/achievements/list", func(c *gin.Context) {
+		achievements := []map[string]string{
+			{"code": "first_game", "name": "First Step", "description": "Play your first game"},
+			{"code": "five_games", "name": "Getting Serious", "description": "Play 5 games"},
+			{"code": "hundred_score", "name": "Centurion", "description": "Score 100+ in a game"},
+			{"code": "perfect_score", "name": "Perfect!", "description": "Score 100% accuracy"},
+			{"code": "pro_user", "name": "Pro Member", "description": "Subscribe to Pro"},
 		}
-		
-		c.JSON(http.StatusOK, stats)
+		c.JSON(http.StatusOK, achievements)
 	})
-	
-	// Get games list
-	r.GET("/api/games", func(c *gin.Context) {
-		games := []map[string]string{
-			{"type": "attention", "name": "Hawkeye", "description": "Visual search and attention training"},
-			{"type": "memory", "name": "Target Tracker", "description": "Working memory and tracking"},
-			{"type": "speed", "name": "Speed Reaction", "description": "Processing speed and reaction time"},
-			{"type": "logic", "name": "Pattern Logic", "description": "Logical reasoning and pattern recognition"},
+}
+
+func checkAchievements(store *store.TrainerStore, userID string, result *games.GameResult) {
+	// Check "First Game" achievement
+	allAchievements, _ := store.GetUserAchievements(userID)
+	hasFirstGame := false
+	for _, a := range allAchievements {
+		if a.Code == "first_game" {
+			hasFirstGame = true
+			break
 		}
-		c.JSON(http.StatusOK, games)
-	})
+	}
+	if !hasFirstGame {
+		store.UnlockAchievement(userID, "first_game", "First Step", "Play your first game")
+	}
+
+	// Check "Centurion" achievement
+	if result.Score >= 100 {
+		all, _ := store.GetUserAchievements(userID)
+		hasCentury := false
+		for _, a := range all {
+			if a.Code == "hundred_score" {
+				hasCentury = true
+				break
+			}
+		}
+		if !hasCentury {
+			store.UnlockAchievement(userID, "hundred_score", "Centurion", "Score 100+ in a game")
+		}
+	}
+
+	// Check "Perfect" achievement
+	if result.Accuracy >= 99.0 {
+		all, _ := store.GetUserAchievements(userID)
+		hasPerfect := false
+		for _, a := range all {
+			if a.Code == "perfect_score" {
+				hasPerfect = true
+				break
+			}
+		}
+		if !hasPerfect {
+			store.UnlockAchievement(userID, "perfect_score", "Perfect!", "Score 100% accuracy")
+		}
+	}
 }
