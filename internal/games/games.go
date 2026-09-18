@@ -90,7 +90,7 @@ func (g *SpeedGame) RunRound(difficulty int) (*GameResult, error) {
 	}
 
 	avgReaction := totalReaction / numTrials
-	accuracy := 100.0 * (map[int]int{0: 90, 1: 85, 2: 80, 3: 75, 4: 70}[difficulty%5]) / 100.0
+	accuracy := float64(map[int]int{0: 90, 1: 85, 2: 80, 3: 75, 4: 70}[difficulty%5]) / 100.0
 
 	score := int(float64(numTrials) * 200 * (1 - float64(avgReaction)/2000) * accuracy)
 	if score < 0 {
@@ -100,7 +100,7 @@ func (g *SpeedGame) RunRound(difficulty int) (*GameResult, error) {
 	return &GameResult{
 		GameType:      "speed",
 		Score:         score,
-		Accuracy:      accuracy,
+		Accuracy:      accuracy * 100,
 		ResponseTime:  int64(avgReaction),
 		Difficulty:    difficulty,
 		AdaptiveLevel: difficulty,
@@ -112,12 +112,10 @@ type LogicGame struct{}
 
 func (g *LogicGame) RunRound(difficulty int) (*GameResult, error) {
 	sequenceLength := 4 + difficulty
-	step := rand.Intn(3) + 1
-	startNum := rand.Intn(10) + 1
-	_ = startNum
+	_ = difficulty
 
 	responseTime := int64(sequenceLength*200) + int64(rand.Intn(800))
-	accuracy := math.Max(0, 100-float64(difficulty)*8)
+	accuracy := math.Max(0, 100-float64(sequenceLength)*5)
 
 	score := int(float64(sequenceLength) * 150 * (1 - float64(responseTime)/3000) * (accuracy / 100))
 	if score < 0 {
@@ -129,8 +127,8 @@ func (g *LogicGame) RunRound(difficulty int) (*GameResult, error) {
 		Score:         score,
 		Accuracy:      accuracy,
 		ResponseTime:  responseTime,
-		Difficulty:    difficulty,
-		AdaptiveLevel: difficulty,
+		Difficulty:    1,
+		AdaptiveLevel: 1,
 	}, nil
 }
 

@@ -4,14 +4,15 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"ai-brain-trainer/internal/games"
 	"ai-brain-trainer/internal/store"
 )
 
-func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
+func SetupRoutes(r *gin.Engine, trainerStore *store.TrainerStore) {
 	// Public routes
 	r.GET("/api/stats/overview", func(c *gin.Context) {
-		stats, err := store.GetOrCreateUserStats("demo")
+		stats, err := trainerStore.GetOrCreateUserStats("demo")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -24,8 +25,7 @@ func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
 		if userID == "" {
 			userID = "demo"
 		}
-		limit := c.DefaultQuery("limit", "20")
-		sessions, err := store.GetUserSessions(userID, 20)
+		sessions, err := trainerStore.GetUserSessions(userID, 20)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -37,8 +37,9 @@ func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
 		limit := 10
 		if l := c.Query("limit"); l != "" {
 			// parse limit
+			_ = l
 		}
-		entries, err := store.GetLeaderboard(limit)
+		entries, err := trainerStore.GetLeaderboard(limit)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -51,7 +52,7 @@ func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
 		if userID == "" {
 			userID = "demo"
 		}
-		achievements, err := store.GetUserAchievements(userID)
+		achievements, err := trainerStore.GetUserAchievements(userID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -98,16 +99,16 @@ func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
 			Difficulty:   req.Difficulty,
 			AdaptiveLevel: result.AdaptiveLevel,
 		}
-		if err := store.CreateSession(session); err != nil {
+		if err := trainerStore.CreateSession(session); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 			return
 		}
 
 		// Update XP and level
-		store.UpdateUserStats(userID, result.Score, result.Score/10)
+		trainerStore.UpdateUserStats(userID, result.Score, result.Score/10)
 
 		// Check achievements
-		checkAchievements(store, userID, result)
+		checkAchievements(trainerStore, userID, result)
 
 		c.JSON(http.StatusOK, result)
 	})
@@ -124,9 +125,9 @@ func SetupRoutes(r *gin.Engine, store *store.TrainerStore) {
 	})
 }
 
-func checkAchievements(store *store.TrainerStore, userID string, result *games.GameResult) {
+func checkAchievements(trainerStore *store.TrainerStore, userID string, result *games.GameResult) {
 	// Check "First Game" achievement
-	allAchievements, _ := store.GetUserAchievements(userID)
+	allAchievements, _ := trainerStore.GetUserAchievements(userID)
 	hasFirstGame := false
 	for _, a := range allAchievements {
 		if a.Code == "first_game" {
@@ -135,12 +136,12 @@ func checkAchievements(store *store.TrainerStore, userID string, result *games.G
 		}
 	}
 	if !hasFirstGame {
-		store.UnlockAchievement(userID, "first_game", "First Step", "Play your first game")
+		trainerStore.UnlockAchievement(userID, "first_game", "First Step", "Play your first game")
 	}
 
 	// Check "Centurion" achievement
 	if result.Score >= 100 {
-		all, _ := store.GetUserAchievements(userID)
+		all, _ := trainerStore.GetUserAchievements(userID)
 		hasCentury := false
 		for _, a := range all {
 			if a.Code == "hundred_score" {
@@ -149,13 +150,13 @@ func checkAchievements(store *store.TrainerStore, userID string, result *games.G
 			}
 		}
 		if !hasCentury {
-			store.UnlockAchievement(userID, "hundred_score", "Centurion", "Score 100+ in a game")
+			trainerStore.UnlockAchievement(userID, "hundred_score", "Centurion", "Score 100+ in a game")
 		}
 	}
 
 	// Check "Perfect" achievement
 	if result.Accuracy >= 99.0 {
-		all, _ := store.GetUserAchievements(userID)
+		all, _ := trainerStore.GetUserAchievements(userID)
 		hasPerfect := false
 		for _, a := range all {
 			if a.Code == "perfect_score" {
@@ -164,7 +165,7 @@ func checkAchievements(store *store.TrainerStore, userID string, result *games.G
 			}
 		}
 		if !hasPerfect {
-			store.UnlockAchievement(userID, "perfect_score", "Perfect!", "Score 100% accuracy")
+			trainerStore.UnlockAchievement(userID, "perfect_score", "Perfect!", "Score 100% accuracy")
 		}
 	}
 }
