@@ -289,7 +289,8 @@ export default function Home() {
     } catch (e) { /* ignore */ }
   };
 
-  const playGame = async (gameType: string, difficulty: number, gameResult: GameResult) => {
+  const playGame = async (gameResult: GameResult) => {
+    const { game_type, difficulty } = gameResult;
     try {
       await fetch('/api/session', {
         method: 'POST',
