@@ -5,21 +5,16 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'AI Brain Trainer - Cognitive Training Platform',
-  description: 'Professional cognitive training platform for attention, memory, speed, and logic',
+  title: 'AI Brain Trainer - Cognitive Training',
+  description: 'Professional brain training for attention, memory, speed, and logic',
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={inter.className}>{children}</body>
