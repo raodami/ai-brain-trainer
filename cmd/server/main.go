@@ -44,6 +44,10 @@ func main() {
 	api.SetupRoutes(r, store)
 	authapi.SetupRoutes(r, authStore)
 	payment.SetupRoutes(r, stripeConfig)
+	api.SetupChallengeRoutes(r)
+	api.SetupRivalRoutes(r)
+	api.SetupThemeRoutes(r)
+	api.SetupShareRoutes(r)
 
 	port := os.Getenv("PORT")
 	if port == "" {
