@@ -9,6 +9,7 @@ import (
 	"ai-brain-trainer/internal/api"
 	authapi "ai-brain-trainer/internal/api/auth"
 	"ai-brain-trainer/internal/auth"
+	"ai-brain-trainer/internal/payment"
 	"ai-brain-trainer/internal/store"
 )
 
@@ -30,11 +31,19 @@ func main() {
 	}
 	defer authStore.Close()
 
+	stripeConfig := &payment.StripeConfig{
+		SecretKey:   os.Getenv("STRIPE_SECRET_KEY"),
+		PublicKey:   os.Getenv("STRIPE_PUBLIC_KEY"),
+		PriceID:     os.Getenv("STRIPE_PRICE_ID"),
+		WebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
+	}
+
 	r := gin.Default()
 	r.Use(cors.Default())
 
 	api.SetupRoutes(r, store)
 	authapi.SetupRoutes(r, authStore)
+	payment.SetupRoutes(r, stripeConfig)
 
 	port := os.Getenv("PORT")
 	if port == "" {
