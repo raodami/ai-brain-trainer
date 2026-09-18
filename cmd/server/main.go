@@ -7,6 +7,8 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"ai-brain-trainer/internal/api"
+	authapi "ai-brain-trainer/internal/api/auth"
+	"ai-brain-trainer/internal/auth"
 	"ai-brain-trainer/internal/store"
 )
 
@@ -22,10 +24,17 @@ func main() {
 	}
 	defer store.Close()
 
+	authStore, err := auth.NewAuthStore(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize auth store: %v", err)
+	}
+	defer authStore.Close()
+
 	r := gin.Default()
 	r.Use(cors.Default())
 
 	api.SetupRoutes(r, store)
+	authapi.SetupRoutes(r, authStore)
 
 	port := os.Getenv("PORT")
 	if port == "" {
