@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ChartBarIcon,
   SparklesIcon,
@@ -14,6 +14,7 @@ import {
   ShareIcon,
   LinkIcon,
   ArrowTrendingUpIcon,
+  UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
 interface GameResult {
